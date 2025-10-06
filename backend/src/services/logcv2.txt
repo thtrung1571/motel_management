@@ -1,0 +1,251 @@
+const { PriceLogic } = require('../models');
+const AppError = require('../utils/appError');
+
+class PriceCalculationService {
+  constructor(priceLogic) {
+    this.priceLogic = priceLogic;
+  }
+
+  static async initialize() {
+    const priceLogic = await PriceLogic.findOne();
+    if (!priceLogic) {
+      throw new Error('Không tìm thấy cấu hình tính giá');
+    }
+    return new PriceCalculationService(priceLogic);
+  }
+
+  isWithinHalfDayTime(time) {
+    const hour = new Date(time).getHours();
+    return hour >= this.priceLogic.halfDayStart && hour <= this.priceLogic.halfDayEnd;
+  }
+
+  calculateHalfDayCharge(durationHours, roomPrices, rentType, hasWarning = false, warningDetails = null, checkInTime, checkOutTime) {
+    // Case 3: Thời gian thuê nằm trong khung giờ half_day
+    if (this.isWithinHalfDayTime(checkInTime) && this.isWithinHalfDayTime(checkOutTime)) {
+      const baseCharge = {
+        type: 'half_day',
+        amount: roomPrices.halfDayPrice,
+        details: {
+          basePrice: roomPrices.halfDayPrice,
+          total: roomPrices.halfDayPrice
+        }
+      };
+
+      // Tính phụ phí nếu vượt giờ
+      if (durationHours > this.priceLogic.maxHalfDayHours) {
+        const extraHours = durationHours - this.priceLogic.maxHalfDayHours;
+        const extraCharge = extraHours * roomPrices.additionalHourPrice;
+        baseCharge.amount += extraCharge;
+        baseCharge.details.extraHours = {
+          hours: extraHours,
+          pricePerHour: roomPrices.additionalHourPrice,
+          total: extraCharge
+        };
+        baseCharge.details.total = baseCharge.amount;
+      }
+
+      return baseCharge;
+    }
+
+    // Case 1: Ngoài khung giờ half_day và chưa vượt ngưỡng overnight
+    if (durationHours <= this.priceLogic.maxHalfDayHours) {
+      const baseCharge = {
+        type: 'half_day',
+        amount: roomPrices.halfDayPrice,
+        details: {
+          basePrice: roomPrices.halfDayPrice,
+          total: roomPrices.halfDayPrice
+        }
+      };
+
+      // Tính phụ phí nếu vượt giờ chuẩn half_day
+      if (durationHours > this.priceLogic.standardHalfDayHours) {
+        const extraHours = durationHours - this.priceLogic.standardHalfDayHours;
+        const extraCharge = extraHours * roomPrices.additionalHourPrice;
+        baseCharge.amount += extraCharge;
+        baseCharge.details.extraHours = {
+          hours: extraHours,
+          pricePerHour: roomPrices.additionalHourPrice,
+          total: extraCharge
+        };
+        baseCharge.details.total = baseCharge.amount;
+      }
+
+      // Thêm cảnh báo nếu gần đến ngưỡng overnight
+      if (durationHours >= this.priceLogic.maxHalfDayHours - 2) {
+        return {
+          ...baseCharge,
+          warning: 'rentype_threshold',
+          suggestedType: 'overnight',
+          suggestedPrice: roomPrices.fullDayPrice,
+          warningMessage: 'Thời gian thuê sắp vượt quá ngưỡng nửa ngày, nên chuyển sang tính nguyên ngày'
+        };
+      }
+
+      return baseCharge;
+    }
+
+    // Case 2: Đã vượt ngưỡng overnight và có cảnh báo
+    if (durationHours >= this.priceLogic.maxHalfDayHours && hasWarning) {
+      return {
+        type: 'overnight',
+        amount: roomPrices.fullDayPrice,
+        details: {
+          basePrice: roomPrices.fullDayPrice,
+          total: roomPrices.fullDayPrice
+        },
+        autoChanged: true,
+        previousType: 'half_day',
+        changedTo: 'overnight'
+      };
+    }
+
+    // Vượt ngưỡng overnight nhưng chưa có cảnh báo
+    return {
+      type: 'half_day',
+      amount: roomPrices.halfDayPrice + 
+        (durationHours - this.priceLogic.standardHalfDayHours) * roomPrices.additionalHourPrice,
+      details: {
+        basePrice: roomPrices.halfDayPrice,
+        extraHours: {
+          hours: durationHours - this.priceLogic.standardHalfDayHours,
+          pricePerHour: roomPrices.additionalHourPrice,
+          total: (durationHours - this.priceLogic.standardHalfDayHours) * roomPrices.additionalHourPrice
+        },
+        total: roomPrices.halfDayPrice + 
+          (durationHours - this.priceLogic.standardHalfDayHours) * roomPrices.additionalHourPrice
+      },
+      warning: 'rentype_threshold',
+      suggestedType: 'overnight',
+      suggestedPrice: roomPrices.fullDayPrice,
+      warningMessage: 'Thời gian thuê đã vượt quá ngưỡng nửa ngày, nên chuyển sang tính nguyên ngày'
+    };
+  }
+
+  calculateHourlyCharge(durationHours, roomPrices, rentType, hasWarning = false, warningDetails = null) {
+    // Xử lý rentType hourly
+    if (rentType === 'hourly') {
+      // Case 4: Đã có cảnh báo và vượt ngưỡng giờ -> chuyển sang nửa ngày
+      if (hasWarning && 
+          warningDetails?.suggestedType === 'half_day' &&
+          durationHours > this.priceLogic.hourlyThreshold && 
+          durationHours <= this.priceLogic.maxHalfDayHours) {
+        return {
+          ...this.calculateHalfDayCharge(durationHours, roomPrices),
+          autoChanged: true,
+          previousType: 'hourly',
+          changedTo: 'half_day'
+        };
+      }
+
+      // Case 5: Đã có cảnh báo và vượt ngưỡng nửa ngày -> chuyển sang nguyên ngày
+      if (hasWarning && 
+          warningDetails?.suggestedType === 'overnight' &&
+          durationHours > this.priceLogic.maxHalfDayHours && 
+          durationHours <= this.priceLogic.maxFullDayHours) {
+        return {
+          ...this.calculateOvernightCharge(durationHours, roomPrices),
+          autoChanged: true,
+          previousType: 'hourly',
+          changedTo: 'overnight'
+        };
+      }
+
+      // Case 1: Dưới ngưỡng giờ
+      if (durationHours <= this.priceLogic.hourlyThreshold) {
+        return this.calculateBasicHourlyRate(durationHours);
+      }
+
+      // Case 2: Vượt ngưỡng giờ nhưng chưa đến nửa ngày -> cảnh báo
+      if (durationHours > this.priceLogic.hourlyThreshold && 
+          durationHours <= this.priceLogic.maxHalfDayHours) {
+        const hourlyCharge = this.calculateBasicHourlyRate(durationHours);
+        return {
+          ...hourlyCharge,
+          warning: 'rentype_threshold',
+          suggestedType: 'half_day',
+          suggestedPrice: roomPrices.halfDayPrice,
+          warningMessage: 'Thời gian thuê đã vượt quá ngưỡng tính giờ, nên chuyển sang tính nửa ngày'
+        };
+      }
+
+      // Case 3: Vượt ngưỡng nửa ngày nhưng chưa đến nguyên ngày -> cảnh báo
+      if (durationHours > this.priceLogic.maxHalfDayHours && 
+          durationHours <= this.priceLogic.maxFullDayHours) {
+        const hourlyCharge = this.calculateBasicHourlyRate(durationHours);
+        return {
+          ...hourlyCharge,
+          warning: 'rentype_threshold',
+          suggestedType: 'overnight',
+          suggestedPrice: roomPrices.fullDayPrice,
+          warningMessage: 'Thời gian thuê đã vượt quá ngưỡng nửa ngày, nên chuyển sang tính nguyên ngày'
+        };
+      }
+    }
+
+    return null;
+  }
+
+  calculateBasicHourlyRate(durationHours) {
+    // Tính giá giờ đầu tiên
+    if (durationHours <= 1) {
+      return {
+        type: 'hourly_base',
+        amount: this.priceLogic.baseHourPrice,
+        details: {
+          hours: 1,
+          basePrice: this.priceLogic.baseHourPrice,
+          total: this.priceLogic.baseHourPrice
+        }
+      };
+    }
+
+    // Tính giá các giờ tiếp theo
+    const additionalHours = Math.ceil(durationHours - 1);
+    const additionalCharge = additionalHours * this.priceLogic.additionalHourPrice;
+    const total = this.priceLogic.baseHourPrice + additionalCharge;
+
+    return {
+      type: 'hourly_mixed',
+      amount: total,
+      details: {
+        firstHour: { 
+          price: this.priceLogic.baseHourPrice 
+        },
+        additionalHours: {
+          hours: additionalHours,
+          pricePerHour: this.priceLogic.additionalHourPrice,
+          total: additionalCharge
+        },
+        total
+      }
+    };
+  }
+
+  calculateCharge(checkInTime, checkOutTime, rentType, roomTypeId) {
+    const durationHours = Math.ceil((checkOutTime - new Date(checkInTime)) / (1000 * 60 * 60));
+    
+    // Lấy giá phòng theo loại phòng
+    const roomPrices = {
+      hourlyPrice: this.priceLogic.baseHourPrice,
+      additionalHourPrice: this.priceLogic.additionalHourPrice,
+      halfDayPrice: this.priceLogic.halfDayPrice,
+      fullDayPrice: this.priceLogic.fullDayPrice
+    };
+
+    switch (rentType) {
+      case 'hourly':
+        return this.calculateHourlyCharge(durationHours, roomPrices, rentType);
+      case 'half_day':
+        return this.calculateHalfDayCharge(durationHours, roomPrices, rentType, false, null, checkInTime, checkOutTime);
+      case 'overnight':
+        return this.calculateOvernightCharge(durationHours, roomPrices);
+      default:
+        throw new Error('Loại thuê phòng không hợp lệ');
+    }
+  }
+
+  // ... giữ nguyên các method khác ...
+}
+
+module.exports = PriceCalculationService;

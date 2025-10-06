@@ -1,0 +1,244 @@
+import { useState, useEffect } from 'react';
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Typography,
+  Grid,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  CircularProgress,
+  Box,
+  Stack,
+  Alert,
+  Chip
+} from '@mui/material';
+import api from '../../../api';
+import { formatPrice, formatDateTime } from '../../../utils/formatters';
+import { toast } from 'react-hot-toast';
+
+const INITIAL_CASH = 1500000; // Tiền mặt định 1.5 triệu
+
+const ShiftReportModal = ({ open, onClose, shift, onConfirm }) => {
+  const [shiftData, setShiftData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (open) {
+      fetchShiftReport();
+    }
+  }, [open]);
+
+  const fetchShiftReport = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get('/api/shifts/current/report');
+      if (response.data.status === 'success') {
+        setShiftData(response.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching shift report:', error);
+      toast.error('Không thể tải báo cáo ca làm việc');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    try {
+      await onConfirm();
+    } catch (error) {
+      toast.error('Không thể kết thúc ca làm việc');
+    }
+  };
+
+  const calculateTotalCash = (shiftData) => {
+    return shiftData.cashAmount + INITIAL_CASH;
+  };
+
+  if (!open) return null;
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+      <DialogTitle>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Typography variant="h6">Thống kê giao ca</Typography>
+          <Box>
+            <Typography variant="body2" color="text.secondary">
+              Nhân viên: {shift?.user?.name}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Bắt đầu: {formatDateTime(shift?.startTime)}
+            </Typography>
+          </Box>
+        </Stack>
+      </DialogTitle>
+      <DialogContent>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+            <CircularProgress />
+          </Box>
+        ) : error ? (
+          <Alert severity="error">{error}</Alert>
+        ) : shiftData && (
+          <Stack spacing={3} sx={{ mt: 2 }}>
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                Thống kê doanh thu
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={2.4}>
+                  <StatBox
+                    title="Tổng tiền mặt"
+                    value={formatPrice(calculateTotalCash(shiftData))}
+                    color="primary.main"
+                  />
+                </Grid>
+                <Grid item xs={12} md={2.4}>
+                  <StatBox
+                    title="Tổng thu"
+                    value={formatPrice(shiftData.totalRevenue)}
+                    color="success.main"
+                  />
+                </Grid>
+                <Grid item xs={12} md={2.4}>
+                  <StatBox
+                    title="Tiền Mặt"
+                    value={formatPrice(shiftData.cashAmount)}
+                    color="primary.main"
+                  />
+                </Grid>
+                <Grid item xs={12} md={2.4}>
+                  <StatBox
+                    title="Tiền thối"
+                    value={formatPrice(INITIAL_CASH)}
+                    color="primary.main"
+                  />
+                </Grid>
+                <Grid item xs={12} md={2.4}>
+                  <StatBox
+                    title="Chuyển Khoản"
+                    value={formatPrice(shiftData.bankingAmount)}
+                    color="info.main"
+                  />
+                </Grid>
+              </Grid>
+            </Paper>
+
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                Lịch sử giao dịch
+              </Typography>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Phòng</TableCell>
+                    <TableCell>Thời Gian</TableCell>
+                    <TableCell align="right">Số Tiền</TableCell>
+                    <TableCell>Phương Thức</TableCell>
+                    <TableCell>Trạng thái</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {shiftData.transactions.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center">
+                        Chưa có giao dịch nào
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    shiftData.transactions.map((transaction) => (
+                      <TableRow key={transaction.id}>
+                        <TableCell>{transaction.roomNumber}</TableCell>
+                        <TableCell>
+                          {formatDateTime(transaction.time)}
+                        </TableCell>
+                        <TableCell align="right">
+                          {formatPrice(transaction.amount)}
+                        </TableCell>
+                        <TableCell>
+                          {transaction.method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản'}
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={transaction.status === 'completed' ? 'Hoàn thành' : 'Đang xử lý'}
+                            color={transaction.status === 'completed' ? 'success' : 'warning'}
+                            size="small"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </Paper>
+
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                Tổng quan phòng
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={3}>
+                  <StatBox
+                    title="Tổng số phòng"
+                    value={shiftData.roomStats?.total || 0}
+                    color="primary.main"
+                  />
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <StatBox
+                    title="Đang sử dụng"
+                    value={shiftData.roomStats?.occupied || 0}
+                    color="error.main"
+                  />
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <StatBox
+                    title="Đang dọn"
+                    value={shiftData.roomStats?.cleaning || 0}
+                    color="warning.main"
+                  />
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <StatBox
+                    title="Sẵn sàng"
+                    value={shiftData.roomStats?.available || 0}
+                    color="success.main"
+                  />
+                </Grid>
+              </Grid>
+            </Paper>
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions sx={{ p: 2 }}>
+        <Button onClick={onClose} variant="outlined">
+          Đóng
+        </Button>
+        <Button onClick={onConfirm} variant="contained" color="primary">
+          Xác nhận giao ca
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+const StatBox = ({ title, value, color }) => (
+  <Paper sx={{ p: 2, textAlign: 'center' }}>
+    <Typography color="text.secondary" gutterBottom>
+      {title}
+    </Typography>
+    <Typography variant="h5" sx={{ color, fontWeight: 'bold' }}>
+      {value}
+    </Typography>
+  </Paper>
+);
+
+export default ShiftReportModal; 

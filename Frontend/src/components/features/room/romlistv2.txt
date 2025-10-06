@@ -1,0 +1,919 @@
+import { useState, useEffect, useMemo } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import {
+  Box,
+  Grid,
+  Card,
+  CardContent,
+  Typography,
+  Chip,
+  Paper,
+  Stack,
+  Divider,
+  Skeleton,
+  Button,
+  TextField,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  CircularProgress,
+  Alert,
+  InputAdornment,
+  TableContainer,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+} from "@mui/material";
+import {
+  Hotel as HotelIcon,
+  Person as PersonIcon,
+  CleaningServices as CleaningIcon,
+  CheckCircle as CheckCircleIcon,
+  Warning as WarningIcon,
+  AccessTime as AccessTimeIcon,
+  CheckCircleOutline as CheckInIcon,
+  ExitToApp,
+  Chair as ChairIcon,
+  LocalHotel as RoomIcon,
+  ExitToApp as CheckoutIcon,
+  Build as BuildIcon,
+  Group as GroupIcon,
+  Search as SearchIcon,
+  ReceiptLong as ReceiptLongIcon,
+  PlayArrow,
+} from "@mui/icons-material";
+import { fetchRooms, checkoutRoom } from "../../../store/slices/roomSlice";
+import { checkoutRental } from "../../../store/slices/rentalSlice";
+import { fetchRoomTypesWithPrices } from "../../../store/slices/settingsSlice";
+import api from "../../../api";
+import CheckInModal from "./CheckInModal";
+import RentalDetailModal from "./RentalDetailModal";
+import { toast } from 'react-toastify';
+import { formatPrice, formatDateTime } from '../../../utils/formatters';
+
+const RoomList = () => {
+  const dispatch = useDispatch();
+  const { rooms = [], loading, error } = useSelector((state) => state.rooms);
+  const { roomTypesWithPrices = [] } = useSelector((state) => state.settings);
+  const [selectedStatus, setSelectedStatus] = useState("all");
+  const [checkInRoom, setCheckInRoom] = useState(null);
+  const [selectedRental, setSelectedRental] = useState(null);
+  const [isModalLoading, setIsModalLoading] = useState(false);
+  const [cleaningRoom, setCleaningRoom] = useState(null);
+  const [carSearch, setCarSearch] = useState('');
+  const [isShiftReportOpen, setIsShiftReportOpen] = useState(false);
+  const [currentShift, setCurrentShift] = useState(null);
+  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const response = await dispatch(fetchRooms()).unwrap();
+        if (response.status === 'success') {
+          // Dữ liệu đã được cập nhật tự động qua reducer
+          await dispatch(fetchRoomTypesWithPrices());
+        }
+      } catch (error) {
+        console.error("Error fetching rooms:", error);
+      }
+    };
+    
+    fetchData();
+  }, [dispatch]);
+
+  // Fetch current shift when component mounts
+  useEffect(() => {
+    const fetchCurrentShift = async () => {
+      try {
+        const response = await api.get('/api/shifts/current');
+        if (response.data.status === 'success') {
+          setCurrentShift(response.data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching current shift:', error);
+      }
+    };
+    fetchCurrentShift();
+  }, []);
+
+  // Handle start new shift
+  const handleStartShift = async () => {
+    try {
+      const response = await api.post('/api/shifts/start');
+      if (response.data.status === 'success') {
+        setCurrentShift(response.data.data.shift);
+        toast.success('Đã bắt đầu ca làm việc mới');
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Không thể bắt đầu ca làm việc');
+    }
+  };
+
+  // Handle end shift
+  const handleEndShift = async () => {
+    setIsShiftModalOpen(true);
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "available":
+        return "success";
+      case "occupied":
+        return "error";
+      case "cleaning":
+        return "warning";
+      case "maintenance":
+        return "secondary";
+      default:
+        return "default";
+    }
+  };
+
+  const getStatusText = (status) => {
+    switch (status) {
+      case "available":
+        return "Sẵn sàng";
+      case "occupied":
+        return "Đang dùng";
+      case "cleaning":
+        return "Đang dọn";
+      case "maintenance":
+        return "Đang bảo trì";
+      default:
+        return "Không xác định";
+    }
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case "available":
+        return <CheckCircleIcon />;
+      case "occupied":
+        return <PersonIcon />;
+      case "cleaning":
+        return <CleaningIcon />;
+      case "maintenance":
+        return <BuildIcon />;
+      default:
+        return <WarningIcon />;
+    }
+  };
+
+  const getChipColor = (status) => {
+    switch (status) {
+      case "available":
+        return "#2e7d32"; // success - màu xanh lá
+      case "occupied":
+        return "#d32f2f"; // error - màu đỏ
+      case "cleaning":
+        return "#ed6c02"; // warning - màu cam
+      case "maintenance":
+        return "#7b1fa2"; // purple - màu tím đậm
+      default:
+        return "#757575"; // default - màu xám
+    }
+  };
+
+  const filterButtons = [
+    { value: "all", label: "Tất cả", color: "primary" },
+    { value: "available", label: "Phòng trống", color: "success" },
+    { value: "occupied", label: "Đang dùng", color: "error" },
+    { value: "cleaning", label: "Đang dọn", color: "warning" },
+    { value: "maintenance", label: "Đang bảo trì", color: "secondary" },
+  ];
+
+  // Tính toán thống kê cho từng tầng
+  const getFloorStats = (floorRooms) => {
+    return {
+      total: floorRooms.length,
+      available: floorRooms.filter(room => room.status === "available").length,
+      occupied: floorRooms.filter(room => room.status === "occupied").length,
+      cleaning: floorRooms.filter(room => room.status === "cleaning").length,
+      maintenance: floorRooms.filter(room => room.status === "maintenance").length
+    };
+  };
+
+  // Nhóm phòng theo tầng và sắp xếp theo số phòng
+  const groupRoomsByFloor = (rooms) => {
+    // Đầu tiên nhóm phòng theo tầng
+    const groupedRooms = rooms.reduce((acc, room) => {
+      const floor = room.floor || 1;
+      if (!acc[floor]) {
+        acc[floor] = [];
+      }
+      acc[floor].push(room);
+      return acc;
+    }, {});
+
+    // Sau đó sắp xếp phòng trong mỗi tầng theo số phòng
+    Object.keys(groupedRooms).forEach(floor => {
+      groupedRooms[floor].sort((a, b) => {
+        // Chuyển số phòng thành số để so sánh
+        const roomNumA = parseInt(a.number);
+        const roomNumB = parseInt(b.number);
+        return roomNumA - roomNumB;
+      });
+    });
+
+    // Sắp xếp các tầng theo thứ tự tăng dần
+    return Object.keys(groupedRooms)
+      .sort((a, b) => parseInt(a) - parseInt(b))
+      .reduce((acc, floor) => {
+        acc[floor] = groupedRooms[floor];
+        return acc;
+      }, {});
+  };
+
+  // Lọc và nhóm phòng
+  const filteredRooms = useMemo(() => {
+    // Đầu tiên, lọc tất cả các phòng
+    let result = [...rooms];
+    
+    // Lọc theo biển số xe nếu có
+    if (carSearch) {
+      result = result.filter(room => {
+        const searchTerm = carSearch.toLowerCase().trim();
+        const carNumber = room.currentRental?.carNumber?.toLowerCase();
+        return carNumber?.includes(searchTerm);
+      });
+    }
+
+    // Nhóm phòng theo tầng và sắp xếp
+    const groupedByFloor = result.reduce((acc, room) => {
+      const floor = room.floor;
+      if (!acc[floor]) {
+        acc[floor] = [];
+      }
+      acc[floor].push(room);
+      return acc;
+    }, {});
+
+    // Sắp xếp phòng trong mỗi tầng theo số phòng
+    Object.keys(groupedByFloor).forEach(floor => {
+      groupedByFloor[floor].sort((a, b) => {
+        const roomNumA = parseInt(a.number);
+        const roomNumB = parseInt(b.number);
+        return roomNumA - roomNumB;
+      });
+    });
+
+    // Sắp xếp các tầng theo thứ tự tăng dần
+    return Object.keys(groupedByFloor)
+      .sort((a, b) => parseInt(a) - parseInt(b))
+      .reduce((acc, floor) => {
+        acc[floor] = groupedByFloor[floor];
+        return acc;
+      }, {});
+  }, [rooms, carSearch]);
+
+  const handleCheckInSuccess = async (data) => {
+    try {
+      // Refresh danh sách phòng sau khi check-in thành công
+      await dispatch(fetchRooms()).unwrap();
+      toast.success('Nhận phòng thành công');
+    } catch (error) {
+      console.error("Error refreshing rooms:", error);
+      toast.error('Có lỗi khi cập nhật danh sách phòng');
+    }
+  };
+
+  const handleCheckout = async (rentalId, checkoutData) => {
+    try {
+      setIsModalLoading(true);
+      console.log('RoomList - Processing checkout:', {
+        rentalId,
+        checkoutTime: checkoutData.checkoutTime,
+        additionalCharges: checkoutData.additionalCharges
+      });
+
+      await dispatch(checkoutRental({
+        rentalId,
+        checkoutData: {
+          ...checkoutData,
+          checkoutTime: checkoutData.checkoutTime
+        }
+      })).unwrap();
+
+      // Refresh danh sách phòng sau khi checkout
+      await dispatch(fetchRooms());
+      
+      toast.success('Checkout thành công');
+    } catch (error) {
+      console.error('Checkout failed:', error);
+      toast.error(error.message || 'Có lỗi xảy ra khi checkout');
+    } finally {
+      setIsModalLoading(false);
+      setSelectedRental(null);
+    }
+  };
+
+  const getRoomTypeName = (type) => {
+    if (!type) return "Chưa có loại phòng";
+    return `${type.name}`;
+  };
+
+  const handleOpenRentalDetail = async (room) => {
+    setIsModalLoading(true);
+    try {
+      const response = await api.get(`/api/rentals/room/${room.id}/active`);
+      if (response.data?.status === 'success') {
+        setSelectedRental(response.data.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch rental details:', error);
+      alert(error.response?.data?.message || 'Không thể tải thông tin phòng');
+    } finally {
+      setIsModalLoading(false);
+    }
+  };
+
+  const handleCloseRentalDetail = () => {
+    setSelectedRental(null);
+  };
+
+  const handleManualRefresh = () => {
+    dispatch(fetchRooms());
+  };
+
+  const getRoomPrice = (roomTypeId) => {
+    const roomType = roomTypesWithPrices?.find(
+      (type) => type._id === roomTypeId,
+    );
+    if (!roomType) {
+      return {
+        hourly: {
+          base: 0,
+          additional: 0,
+        },
+        halfDay: 0,
+        fullDay: 0,
+      };
+    }
+    return {
+      hourly: {
+        base: roomType.hourlyPrice?.base || 0,
+        additional: roomType.hourlyPrice?.additional || 0,
+      },
+      halfDay: roomType.halfDayPrice || 0,
+      fullDay: roomType.fullDayPrice || 0,
+    };
+  };
+
+  const handleCleaningClick = (room) => {
+    setCleaningRoom(room);
+  };
+
+  const handleConfirmCleaning = async () => {
+    try {
+      await api.patch(`/api/rooms/${cleaningRoom.id}/status`, {
+        status: 'available'
+      });
+      
+      dispatch(fetchRooms()); // Refresh danh sách phòng
+      setCleaningRoom(null); // Đóng dialog
+    } catch (error) {
+      console.error('Error updating room status:', error);
+    }
+  };
+
+  const getRoomStatusColor = (status) => {
+    switch (status) {
+      case 'available':
+        return 'success';
+      case 'occupied':
+        return 'error';
+      case 'cleaning':
+        return 'warning';
+      default:
+        return 'default';
+    }
+  };
+
+  const getRoomStatusText = (status) => {
+    switch (status) {
+      case 'available':
+        return 'Sẵn sàng';
+      case 'occupied':
+        return 'Có khách';
+      case 'cleaning':
+        return 'Đang dọn';
+      case 'maintenance':
+        return 'Đang bảo trì';
+      default:
+        return status;
+    }
+  };
+
+  const formatRoomNumber = (number) => {
+    return `P${number}`; // Thêm prefix "P" vào số phòng
+  };
+
+  const handleRentalUpdate = (updatedRental) => {
+    // Cập nhật lại danh sách phòng khi có thay đổi từ RentalDetailModal
+    dispatch(fetchRooms());
+  };
+
+  const getRoomWithStatus = (room) => ({
+    ...room,
+    currentStatus: room.status === "available" ? "Sẵn sàng" :
+                  room.status === "occupied" ? "Đang có khách" :
+                  room.status === "cleaning" ? "Đang dọn dẹp" :
+                  room.status === "maintenance" ? "Đang bảo trì" : null
+  });
+
+  const handleOpenShiftReport = () => {
+    setIsShiftReportOpen(true);
+  };
+
+  if (loading) {
+    return (
+      <Box>
+        <Box mb={3}>
+          <Skeleton variant="rectangular" width="100%" height={60} />
+        </Box>
+        <Paper sx={{ p: 2, mb: 3 }}>
+          <Skeleton variant="rectangular" height={40} />
+        </Paper>
+        {[1, 2].map((floor) => (
+          <Box key={floor} mb={4}>
+            <Skeleton variant="text" width={200} sx={{ mb: 2 }} />
+            <Grid container spacing={3}>
+              {[1, 2, 3, 4].map((item) => (
+                <Grid item xs={12} sm={6} md={4} lg={3} key={item}>
+                  <Skeleton variant="rectangular" height={200} />
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+        ))}
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ pt: 0.5 }}>
+      <Stack 
+        direction="row" 
+        spacing={2} 
+        alignItems="center" 
+        justifyContent="space-between" 
+        sx={{ mb: 2 }}
+      >
+        <Stack direction="row" spacing={2} alignItems="center">
+          <Typography variant="subtitle1" fontWeight="bold">
+            Danh sách phòng
+          </Typography>
+          <TextField
+            size="small"
+            placeholder="Tìm biển số xe..."
+            value={carSearch}
+            onChange={(e) => setCarSearch(e.target.value)}
+            sx={{ 
+              width: 200,
+              '& .MuiInputBase-root': {
+                backgroundColor: 'rgba(255, 255, 255, 0.8)',
+              }
+            }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            }}
+          />
+        </Stack>
+
+        <Button
+          variant="contained"
+          color={currentShift ? "warning" : "primary"}
+          startIcon={currentShift ? <ExitToApp /> : <PlayArrow />}
+          onClick={currentShift ? handleEndShift : handleStartShift}
+          sx={{ 
+            borderRadius: 2,
+            textTransform: 'none',
+            boxShadow: 2
+          }}
+        >
+          {currentShift ? 'Giao Ca' : 'Nhận Ca'}
+        </Button>
+      </Stack>
+
+      {Object.entries(filteredRooms).length === 0 ? (
+        <Paper sx={{ p: 2, textAlign: "center" }}>
+          <Typography variant="h6" color="text.secondary">
+            {carSearch.trim() 
+              ? 'Không tìm thấy phòng nào có biển số xe này'
+              : 'Không tìm thấy phòng nào'
+            }
+          </Typography>
+        </Paper>
+      ) : (
+        <Grid container spacing={2}>
+          {Object.entries(filteredRooms).map(([floor, floorRooms]) => {
+            const stats = getFloorStats(floorRooms);
+            return (
+              <Grid item xs={12} key={`floor-${floor}`}>
+                <Paper
+                  sx={{
+                    p: 1,
+                    mb: 1,
+                    bgcolor: 'primary.main',
+                    color: 'primary.contrastText',
+                    borderRadius: 1,
+                  }}
+                >
+                  <Stack 
+                    direction="row" 
+                    justifyContent="space-between" 
+                    alignItems="center"
+                    px={1}
+                  >
+                    <Typography variant="subtitle1" fontWeight="bold">
+                      Tầng {floor}
+                    </Typography>
+                    <Stack direction="row" spacing={2}>
+                      <Typography variant="body2">
+                        Sạch: {stats.available}
+                      </Typography>
+                      <Typography variant="body2">
+                        Dơ: {stats.cleaning}
+                      </Typography>
+                      <Typography variant="body2">
+                        Có khách: {stats.occupied}
+                      </Typography>
+                      <Typography variant="body2">
+                        Bảo trì: {stats.maintenance}
+                      </Typography>
+                    </Stack>
+                  </Stack>
+                </Paper>
+
+                <Grid container spacing={1}>
+                  {floorRooms.map((room) => {
+                    const roomWithStatus = getRoomWithStatus(room);
+                    return (
+                      <Grid item xs={12} sm={6} md={4} lg={12/7} key={`room-${room.id}`}>
+                        <Card
+                          elevation={3}
+                          sx={{
+                            height: "100%",
+                            display: "flex",
+                            flexDirection: "column",
+                            transition: "transform 0.3s, box-shadow 0.3s",
+                            "&:hover": {
+                              transform: "translateY(-5px)",
+                              boxShadow: 6,
+                            },
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              p: 2,
+                              background:
+                                room.status === "available"
+                                  ? "linear-gradient(45deg, #2e7d32 30%, #43a047 90%)"
+                                  : room.status === "occupied"
+                                    ? "linear-gradient(45deg, #c62828 30%, #d32f2f 90%)"
+                                    : room.status === "maintenance"
+                                      ? "linear-gradient(45deg, #6a1b9a 30%, #7b1fa2 90%)"
+                                      : "linear-gradient(45deg, #e65100 30%, #ed6c02 90%)",
+                              color: "white",
+                            }}
+                          >
+                            <Stack
+                              direction="row"
+                              justifyContent="space-between"
+                              alignItems="center"
+                            >
+                              <Typography variant="h6" fontWeight="bold">
+                                {formatRoomNumber(room.number)}
+                              </Typography>
+                              <Chip
+                                icon={getStatusIcon(room.status)}
+                                label={getStatusText(room.status)}
+                                color={getStatusColor(room.status)}
+                                size="small"
+                                sx={{
+                                  backgroundColor: "white",
+                                  "& .MuiChip-icon": {
+                                    color: getChipColor(room.status),
+                                  },
+                                  "& .MuiChip-label": {
+                                    color: getChipColor(room.status),
+                                    fontWeight: "bold",
+                                  },
+                                }}
+                              />
+                            </Stack>
+                          </Box>
+
+                          <CardContent sx={{ flexGrow: 1 }}>
+                            <Stack spacing={2}>
+                              {room.hasLoveChair && (
+                                <Box display="flex" alignItems="center" gap={1}>
+                                  <ChairIcon color="primary" />
+                                  <Typography>Có ghế tình yêu</Typography>
+                                </Box>
+                              )}
+
+                              {room.status === "occupied" && (
+                                <>
+                                  <Box display="flex" alignItems="center" gap={1}>
+                                    <GroupIcon color="primary" />
+                                    <Typography>
+                                      {`Số khách: ${room.currentRental?.numberOfGuests || 0}`}
+                                    </Typography>
+                                  </Box>
+                                  {room.checkInTime && (
+                                    <Box display="flex" alignItems="center" gap={1}>
+                                      <AccessTimeIcon color="primary" />
+                                      <Typography>
+                                        {`Từ: ${new Date(room.checkInTime).toLocaleTimeString("vi-VN")}`}
+                                      </Typography>
+                                    </Box>
+                                  )}
+                                </>
+                              )}
+                            </Stack>
+                          </CardContent>
+
+                          <Divider />
+
+                          <Box sx={{ p: 1.5 }}>
+                            {room.status === "available" ? (
+                              <CheckInModal 
+                                room={{
+                                  ...room,
+                                  currentStatus: "Sẵn sàng"
+                                }}
+                                onSuccess={handleCheckInSuccess}
+                              />
+                            ) : room.status === "occupied" ? (
+                              <Button
+                                onClick={() => handleOpenRentalDetail(room)}
+                                variant="contained"
+                                color="info"
+                                startIcon={<RoomIcon />}
+                                fullWidth
+                              >
+                                Chi tiết phòng
+                              </Button>
+                            ) : room.status === "cleaning" ? (
+                              <Button
+                                fullWidth
+                                variant="contained"
+                                onClick={() => handleCleaningClick(room)}
+                                startIcon={<CleaningIcon />}
+                              >
+                                Đang dọn
+                              </Button>
+                            ) : (
+                              <Button
+                                fullWidth
+                                variant="contained"
+                                disabled
+                                startIcon={<BuildIcon />}
+                              >
+                                Đang bảo trì
+                              </Button>
+                            )}
+                          </Box>
+                        </Card>
+                      </Grid>
+                    );
+                  })}
+                </Grid>
+              </Grid>
+            );
+          })}
+        </Grid>
+      )}
+
+      {/* Dialog xác nhận dọn phòng */}
+      <Dialog 
+        open={!!cleaningRoom} 
+        onClose={() => setCleaningRoom(null)}
+      >
+        <DialogTitle>
+          Xác nhận dọn phòng
+        </DialogTitle>
+        <DialogContent>
+          <Typography>
+            Xác nhận phòng {cleaningRoom?.number} đã được dọn dẹp xong?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setCleaningRoom(null)}
+          >
+            Hủy
+          </Button>
+          <Button 
+            variant="contained" 
+            color="primary"
+            onClick={handleConfirmCleaning}
+          >
+            Xác nhận
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Modal */}
+      <RentalDetailModal
+        open={!!selectedRental}
+        onClose={handleCloseRentalDetail}
+        rental={selectedRental}
+        onCheckout={handleCheckout}
+        onUpdate={handleRentalUpdate}
+      />
+
+      <ShiftReportModal 
+        open={isShiftReportOpen}
+        onClose={() => setIsShiftReportOpen(false)}
+      />
+
+      {/* Shift Report Modal */}
+      <ShiftReportModal
+        open={isShiftModalOpen}
+        onClose={() => setIsShiftModalOpen(false)}
+        shift={currentShift}
+        onConfirm={async () => {
+          try {
+            const response = await api.post('/api/shifts/end');
+            if (response.data.status === 'success') {
+              setCurrentShift(null);
+              setIsShiftModalOpen(false);
+              toast.success('Đã kết thúc ca làm việc');
+            }
+          } catch (error) {
+            toast.error(error.response?.data?.message || 'Không thể kết thúc ca làm việc');
+          }
+        }}
+      />
+    </Box>
+  );
+};
+
+const ShiftReportModal = ({ open, onClose, shift, onConfirm }) => {
+  const [shiftData, setShiftData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (open) {
+      fetchShiftReport();
+    }
+  }, [open]);
+
+  const fetchShiftReport = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get('/api/shifts/current/report');
+      setShiftData(response.data.data);
+    } catch (error) {
+      console.error('Error fetching shift report:', error);
+      setError('Không thể tải dữ liệu giao ca');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>Thống kê giao ca</DialogTitle>
+      <DialogContent>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+            <CircularProgress />
+          </Box>
+        ) : error ? (
+          <Alert severity="error">{error}</Alert>
+        ) : shiftData && (
+          <Stack spacing={3} sx={{ mt: 2 }}>
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                Thông tin ca làm việc
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography>Thời gian bắt đầu:</Typography>
+                  <Typography variant="subtitle1">
+                    {formatDateTime(shiftData.startTime)}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography>Nhân viên:</Typography>
+                  <Typography variant="subtitle1">
+                    {shiftData.employee?.name || 'N/A'}
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Paper>
+
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                Thống kê doanh thu
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={4}>
+                  <StatBox
+                    title="Tổng thu"
+                    value={formatPrice(shiftData.totalRevenue)}
+                    color="success.main"
+                  />
+                </Grid>
+                <Grid item xs={4}>
+                  <StatBox
+                    title="Tiền mặt"
+                    value={formatPrice(shiftData.cashAmount)}
+                    color="primary.main"
+                  />
+                </Grid>
+                <Grid item xs={4}>
+                  <StatBox
+                    title="Chuyển khoản"
+                    value={formatPrice(shiftData.bankingAmount)}
+                    color="info.main"
+                  />
+                </Grid>
+              </Grid>
+            </Paper>
+
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                Chi tiết giao dịch
+              </Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Phòng</TableCell>
+                      <TableCell>Thời gian</TableCell>
+                      <TableCell align="right">Số tiền</TableCell>
+                      <TableCell>Phương thức</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {shiftData.transactions.map((transaction) => (
+                      <TableRow key={transaction.id}>
+                        <TableCell>{transaction.roomNumber}</TableCell>
+                        <TableCell>
+                          {formatDateTime(transaction.time)}
+                        </TableCell>
+                        <TableCell align="right">
+                          {formatPrice(transaction.amount)}
+                        </TableCell>
+                        <TableCell>
+                          {transaction.method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions sx={{ p: 2 }}>
+        <Button onClick={onClose} variant="outlined">
+          Đóng
+        </Button>
+        <Button onClick={onConfirm} variant="contained" color="primary">
+          Xác nhận giao ca
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+const StatBox = ({ title, value, color }) => (
+  <Box
+    sx={{
+      p: 2,
+      borderRadius: 1,
+      border: 1,
+      borderColor: 'divider',
+      textAlign: 'center'
+    }}
+  >
+    <Typography color="text.secondary" gutterBottom>
+      {title}
+    </Typography>
+    <Typography 
+      variant="h5" 
+      sx={{ 
+        color: color,
+        fontWeight: 'bold'
+      }}
+    >
+      {value}
+    </Typography>
+  </Box>
+);
+
+export default RoomList;

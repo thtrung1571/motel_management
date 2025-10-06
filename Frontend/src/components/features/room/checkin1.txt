@@ -1,0 +1,753 @@
+import { useState, useEffect, useCallback, memo } from "react";
+import {
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Box,
+  TextField,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Typography,
+  Grid,
+  Card,
+  CardContent,
+  IconButton,
+  Divider,
+  Stack,
+  Autocomplete,
+  Paper,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+} from "@mui/material";
+import {
+  CheckCircleOutline as CheckInIcon,
+  Add as AddIcon,
+  Remove as RemoveIcon,
+  LocalBar as DrinkIcon,
+} from "@mui/icons-material";
+import api from "../../../api";
+import CustomerSearchInput from "../../common/CustomerSearchInput";
+import { useDispatch } from "react-redux";
+import { checkInRoom } from "../../../store/slices/roomSlice";
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
+import dayjs from 'dayjs';
+
+const CustomerInfo = memo(({ customerInfo }) => {
+  if (!customerInfo) return null;
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Stack spacing={2}>
+        {/* Thông tin cơ bản */}
+        <Stack spacing={1}>
+          <Typography variant="subtitle2" color="primary">
+            Thông tin khách hàng
+          </Typography>
+          
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Typography variant="body2">
+              {customerInfo.fullName || 'Chưa có thông tin'}
+            </Typography>
+            <Box sx={{ 
+              px: 1, 
+              py: 0.5, 
+              bgcolor: 'primary.lighter', 
+              borderRadius: 1 
+            }}>
+              <Typography variant="caption" color="primary.main">
+                {customerInfo.visitCount || 0} lần thuê
+              </Typography>
+            </Box>
+          </Stack>
+
+          {customerInfo.lastVisit && (
+            <Typography variant="body2" color="text.secondary">
+              Lần cuối: {dayjs(customerInfo.lastVisit).format('DD/MM/YY HH:mm')}
+            </Typography>
+          )}
+        </Stack>
+
+        {/* Lịch sử thuê phòng */}
+        {customerInfo.rentalHistory && customerInfo.rentalHistory.length > 0 && (
+          <Stack spacing={1}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Lịch sử thuê phòng (5 lần gần nhất)
+            </Typography>
+            
+            {customerInfo.rentalHistory.map((rental, index) => (
+              <Box
+                key={index}
+                sx={{
+                  p: 1,
+                  borderRadius: 1,
+                  bgcolor: 'grey.50',
+                  border: '1px solid',
+                  borderColor: 'divider'
+                }}
+              >
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Typography variant="caption" color="text.secondary">
+                      {rental.date}
+                    </Typography>
+                    <Typography variant="caption" color="primary">
+                      Phòng {rental.roomNumber}
+                    </Typography>
+                  </Stack>
+                  <Typography variant="caption" color="success.main">
+                    {rental.totalAmount}đ
+                  </Typography>
+                </Stack>
+                {rental.note && (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                    Ghi chú: {rental.note}
+                  </Typography>
+                )}
+              </Box>
+            ))}
+          </Stack>
+        )}
+      </Stack>
+    </Box>
+  );
+});
+
+const CheckInModal = ({ room, onCheckIn }) => {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [customerInfo, setCustomerInfo] = useState(null);
+  const [drinks, setDrinks] = useState([]);
+  const [carSuggestions, setCarSuggestions] = useState([]);
+  const [carNumber, setCarNumber] = useState("");
+  const [numberOfGuests, setNumberOfGuests] = useState(1);
+  const [rentType, setRentType] = useState("hourly");
+  const [selectedDrinks, setSelectedDrinks] = useState([]);
+  const [isModalLoading, setIsModalLoading] = useState(false);
+  const dispatch = useDispatch();
+  const [isWalkIn, setIsWalkIn] = useState(false);
+  const [priceLogic, setPriceLogic] = useState(null);
+  const [priceEstimate, setPriceEstimate] = useState({
+    basePrice: 0,
+    additionalPrice: 0,
+    estimatedCheckout: null,
+    note: ''
+  });
+  const [checkInTime, setCheckInTime] = useState(dayjs());
+  const [timeWarning, setTimeWarning] = useState(null);
+
+  const rentTypeOptions = [
+    { value: 'hourly', label: 'Theo giờ' },
+    { value: 'halfday', label: 'Nửa ngày' },
+    { value: 'overnight', label: 'Nguyên ngày' }
+  ];
+
+  useEffect(() => {
+    if (open) {
+      fetchDrinks();
+      fetchPriceEstimate(rentType);
+    }
+  }, [open, rentType]);
+
+  const fetchDrinks = async () => {
+    try {
+      const response = await api.get("/api/drinks");
+      if (response.data.status === 'success') {
+        setDrinks(response.data.data || []);
+      } else {
+        console.error("Failed to fetch drinks: Invalid response status");
+        setDrinks([]);
+      }
+    } catch (error) {
+      console.error("Failed to fetch drinks:", error);
+      setDrinks([]);
+    }
+  };
+
+  const fetchCarSuggestions = async (searchQuery) => {
+    try {
+      if (!searchQuery) return;
+      const response = await api.get(
+        `/api/customers?search=${searchQuery}&limit=5`,
+      );
+      setCarSuggestions(response.data.customers || []);
+    } catch (error) {
+      console.error("Failed to fetch car suggestions:", error);
+      setCarSuggestions([]);
+    }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (carNumber.length >= 2) {
+        fetchCarSuggestions(carNumber);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [carNumber]);
+
+  const handleCarSelect = (car) => {
+    setCarNumber(car.carNumber);
+    fetchCustomerInfo(car.carNumber);
+  };
+
+  const fetchCustomerInfo = async (carNumber) => {
+    try {
+      const response = await api.get(`/api/customers/car/${carNumber}`);
+      setCustomerInfo(response.data);
+    } catch (error) {
+      setCustomerInfo(null);
+    }
+  };
+
+  const handleDrinkSelect = (drink) => {
+    setSelectedDrinks((prev) => {
+      const existingDrink = prev.find((d) => d.id === drink.id);
+      
+      if (existingDrink) {
+        // Nếu đồ uống đã tồn tại, tăng số lượng
+        return prev.map((d) => 
+          d.id === drink.id 
+            ? { ...d, quantity: d.quantity + 1 }
+            : d
+        );
+      } else {
+        // Nếu đồ uống chưa tồn tại, thêm mới với số lượng 1
+        return [...prev, {
+          id: drink.id,
+          name: drink.name,
+          sellingPrice: drink.sellingPrice,
+          quantity: 1
+        }];
+      }
+    });
+  };
+
+  const handleUpdateDrinkQuantity = (drinkId, change) => {
+    setSelectedDrinks((prev) => {
+      return prev.reduce((acc, drink) => {
+        if (drink.id === drinkId) {
+          const newQuantity = drink.quantity + change;
+          if (newQuantity <= 0) {
+            // Nếu số lượng = 0, không thêm vào mảng mới
+            return acc;
+          }
+          return [...acc, { ...drink, quantity: newQuantity }];
+        }
+        return [...acc, drink];
+      }, []);
+    });
+  };
+
+  const handleCheckIn = async (formData) => {
+    try {
+      setIsModalLoading(true);
+
+      // Log để debug
+      console.log("Check-in data:", formData);
+
+      // Tìm customer
+      let customerResponse;
+      try {
+        customerResponse = await api.get(
+          `/api/customers/car/${formData.carNumber.trim().toUpperCase()}`
+        );
+      } catch (error) {
+        // Nếu không tìm thấy khách hàng, tạo mới
+        if (error.response?.status === 404) {
+          customerResponse = await api.post('/api/customers', {
+            carNumber: formData.carNumber.trim().toUpperCase(),
+            fullName: '',
+            gender: 'Khác',
+            cccd: '',
+            birthDay: null,
+            placeLiving: '',
+            visitCount: 0,
+            lastVisit: new Date().toISOString(),
+            note: 'Khách hàng mới tạo qua check-in'
+          });
+        } else {
+          throw error;
+        }
+      }
+
+      if (!customerResponse.data) {
+        throw new Error("Không thể tạo/tìm thông tin khách hàng");
+      }
+
+      // Sử dụng action checkInRoom thay vì gọi API trực tiếp
+      const result = await dispatch(checkInRoom({
+        roomId: formData.roomId,
+        customerId: customerResponse.data._id,
+        carNumber: formData.carNumber.trim().toUpperCase(),
+        numberOfGuests: parseInt(formData.numberOfGuests),
+        rentType: formData.rentType || "hourly",
+        drinks: formData.drinks?.map((drink) => ({
+          drink: drink._id,
+          name: drink.name,
+          quantity: drink.quantity,
+          price: drink.sellingPrice || drink.price,
+        })) || [],
+      })).unwrap();
+
+      if (result) {
+        setOpen(false);
+        // Reset form
+        setCarNumber("");
+        setNumberOfGuests(1);
+        setRentType("hourly");
+        setSelectedDrinks([]);
+      }
+    } catch (error) {
+      console.error("Check-in failed:", error);
+      const errorMessage =
+        error.response?.data?.message ||
+        error.message ||
+        "Có lỗi xảy ra khi check-in";
+      alert(errorMessage);
+    } finally {
+      setIsModalLoading(false);
+    }
+  };
+
+  const handleTimeChange = (newTime) => {
+    if (!newTime) return;
+    
+    const currentTime = dayjs();
+    
+    // Tạo thời gian mới với ngày tháng năm của hiện tại và giờ phút mới được chọn
+    const adjustedTime = currentTime
+      .hour(newTime.hour())
+      .minute(newTime.minute())
+      .second(0)
+      .millisecond(0);
+    
+    const diffInMinutes = Math.abs(currentTime.diff(adjustedTime, 'minute'));
+    
+    if (diffInMinutes > 30) {
+      setTimeWarning('warning_time_2');
+    } else if (diffInMinutes > 0) {
+      setTimeWarning('warning_time_1');
+    } else {
+      setTimeWarning(null);
+    }
+    
+    setCheckInTime(adjustedTime);
+  };
+
+  const handleSubmit = async () => {
+    try {
+      setLoading(true);
+
+      // Tạo lại adjustedTime khi submit để đảm bảo chính xác
+      const currentTime = dayjs();
+      const adjustedTime = currentTime
+        .hour(checkInTime.hour())
+        .minute(checkInTime.minute())
+        .second(0)
+        .millisecond(0);
+
+      // Log để kiểm tra giá trị
+      console.log('Current checkInTime:', checkInTime.format('YYYY-MM-DD HH:mm:ss.SSS'));
+      console.log('Adjusted checkInTime:', adjustedTime.format('YYYY-MM-DD HH:mm:ss.SSS'));
+
+      // Tạo walkInId trước để đảm bảo sử dụng cùng một giá trị
+      const walkInId = isWalkIn ? `WALK-IN-${Date.now()}` : carNumber.trim();
+
+      const checkInData = {
+        roomId: room.id,
+        carNumber: walkInId,
+        numberOfGuests: numberOfGuests,
+        rentType: rentType,
+        drinks: selectedDrinks.map(drink => ({
+          name: drink.name,
+          quantity: drink.quantity,
+          price: drink.sellingPrice || drink.price
+        })),
+        isWalkIn: isWalkIn,
+        checkInTime: adjustedTime.toISOString(),
+        timeWarning: timeWarning
+      };
+
+      // Log data trước khi gửi request
+      console.log('Final checkInData:', checkInData);
+
+      // Dispatch action checkInRoom
+      const result = await dispatch(checkInRoom(checkInData)).unwrap();
+
+      if (result.status === 'success') {
+        // Đóng modal và reset form
+        setOpen(false);
+        resetForm();
+        
+        // Callback nếu có
+        if (onCheckIn) {
+          onCheckIn(result.data);
+        }
+      } else {
+        throw new Error(result.message || 'Có lỗi xảy ra');
+      }
+    } catch (error) {
+      console.error('Check-in failed:', error);
+      alert(error.message || 'Có lỗi xảy ra khi nhận phòng');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetForm = () => {
+    setCarNumber('');
+    setNumberOfGuests(1);
+    setRentType('hourly');
+    setSelectedDrinks([]);
+    setCustomerInfo(null);
+    setIsWalkIn(false);
+  };
+
+  const handleCustomerSelect = useCallback((customer) => {
+    if (customer) {
+      setCarNumber(customer.carNumber);
+      setCustomerInfo({
+        fullName: customer.fullName,
+        visitCount: customer.visitCount,
+        lastVisit: customer.lastVisit,
+        rentalHistory: customer.rentalHistory
+      });
+    }
+  }, []);
+
+  // Fetch price estimate khi thay đổi rentType
+  const fetchPriceEstimate = async (type) => {
+    try {
+      if (!room?.type?.id) return;
+
+      const response = await api.get('/api/rentals/estimate-price', {
+        params: {
+          rentType: type,
+          roomTypeId: room.type.id
+        }
+      });
+
+      if (response.data.status === 'success') {
+        setPriceEstimate(response.data.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch price estimate:', error);
+      setPriceEstimate({
+        basePrice: 0,
+        additionalPrice: 0,
+        estimatedCheckout: null,
+        note: ''
+      });
+    }
+  };
+
+  // Fetch price estimate khi mở modal và khi thay đổi rentType
+  useEffect(() => {
+    if (open && room?.type?.id) {
+      fetchPriceEstimate(rentType);
+    }
+  }, [open, rentType, room?.type?.id]);
+
+  return (
+    <>
+      <Button
+        fullWidth
+        variant="contained"
+        color="primary"
+        startIcon={<CheckInIcon />}
+        onClick={() => setOpen(true)}
+      >
+        Nhận phòng
+      </Button>
+
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            bgcolor: "background.default",
+          },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            borderBottom: 1,
+            borderColor: "divider",
+            pb: 2,
+          }}
+        >
+          Nhận phòng {room.number}
+        </DialogTitle>
+
+        <DialogContent sx={{ py: 3 }}>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={6}>
+              <Stack spacing={2}>
+                <Button
+                  fullWidth
+                  variant={isWalkIn ? "contained" : "outlined"}
+                  onClick={() => setIsWalkIn(!isWalkIn)}
+                >
+                  {isWalkIn ? "Khách bộ hành" : "Khách có xe"}
+                </Button>
+
+                {!isWalkIn && (
+                  <>
+                    <CustomerSearchInput
+                      value={carNumber}
+                      onChange={(value) => setCarNumber(value)}
+                      onCustomerSelect={handleCustomerSelect}
+                      disabled={loading}
+                    />
+                    {customerInfo && <CustomerInfo customerInfo={customerInfo} />}
+                  </>
+                )}
+
+                <TextField
+                  fullWidth
+                  type="number"
+                  label="Số khách"
+                  variant="outlined"
+                  value={numberOfGuests}
+                  onChange={(e) => setNumberOfGuests(parseInt(e.target.value))}
+                />
+
+                <DateTimePicker
+                  label="Thời gian nhận phòng"
+                  value={checkInTime}
+                  onChange={handleTimeChange}
+                  format="HH:mm"
+                  views={['hours', 'minutes']}
+                  maxDateTime={dayjs()}
+                  slotProps={{
+                    textField: {
+                      fullWidth: true,
+                    }
+                  }}
+                />
+
+                <FormControl fullWidth>
+                  <InputLabel>Hình thức thuê</InputLabel>
+                  <Select
+                    value={rentType}
+                    label="Hình thức thuê"
+                    onChange={(e) => {
+                      setRentType(e.target.value);
+                      fetchPriceEstimate(e.target.value);
+                    }}
+                  >
+                    {rentTypeOptions.map(option => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+
+                  {/* Hiển thị thông tin giá ước tính */}
+                  {priceEstimate && (
+                    <Box sx={{ 
+                      mt: 1, 
+                      p: 2, 
+                      bgcolor: 'background.neutral',
+                      borderRadius: 1,
+                      border: '1px solid',
+                      borderColor: 'divider'
+                    }}>
+                      <Stack spacing={1}>
+                        <Typography variant="subtitle2" color="primary">
+                          Thông tin giá
+                        </Typography>
+                        
+                        <Typography variant="body2">
+                          Giá cơ bản: {priceEstimate.basePrice?.toLocaleString('vi-VN')}đ
+                        </Typography>
+                        
+                        {priceEstimate.additionalPrice > 0 && (
+                          <Typography variant="body2" color="text.secondary">
+                            Giá phụ trội: {priceEstimate.additionalPrice?.toLocaleString('vi-VN')}đ/giờ
+                          </Typography>
+                        )}
+
+                        {priceEstimate.note && (
+                          <Typography variant="body2" color="text.secondary">
+                            {priceEstimate.note}
+                          </Typography>
+                        )}
+
+                        {priceEstimate.estimatedCheckout && (
+                          <Typography variant="body2" color="warning.main">
+                            Trả phòng trước: {new Date(priceEstimate.estimatedCheckout).toLocaleTimeString('vi-VN')}
+                          </Typography>
+                        )}
+                      </Stack>
+                    </Box>
+                  )}
+                </FormControl>
+              </Stack>
+            </Grid>
+
+            <Grid item xs={12} md={6}>
+              <Card variant="outlined" sx={{ height: "100%" }}>
+                <CardContent>
+                  <Typography
+                    variant="h6"
+                    gutterBottom
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1,
+                    }}
+                  >
+                    <DrinkIcon /> Đồ uống
+                  </Typography>
+
+                  <Divider sx={{ my: 2 }} />
+
+                  <Box
+                    sx={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fill, minmax(150px, 1fr))",
+                      gap: 2,
+                    }}
+                  >
+                    {drinks.map((drink) => (
+                      <Card
+                        key={`drink-list-${drink.id}`}
+                        variant="outlined"
+                        onClick={() => handleDrinkSelect(drink)}
+                        sx={{
+                          cursor: "pointer",
+                          transition: "all 0.2s",
+                          "&:hover": {
+                            transform: "translateY(-2px)",
+                            boxShadow: 1,
+                          },
+                          bgcolor: selectedDrinks.some(
+                            (d) => d.id === drink.id
+                          )
+                            ? "primary.light"
+                            : "background.paper",
+                        }}
+                      >
+                        <CardContent>
+                          <Typography variant="subtitle2" align="center">
+                            {drink.name}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            align="center"
+                            display="block"
+                            color="text.secondary"
+                          >
+                            {new Intl.NumberFormat("vi-VN", {
+                              style: "currency",
+                              currency: "VND",
+                            }).format(drink.sellingPrice)}
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </Box>
+
+                  {selectedDrinks.length > 0 && (
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Đã chọn:
+                      </Typography>
+                      <Stack spacing={1}>
+                        {selectedDrinks.map((drink) => (
+                          <Card
+                            key={`selected-drink-${drink.id}`}
+                            variant="outlined"
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              p: 1,
+                            }}
+                          >
+                            <Box sx={{ flex: 1 }}>
+                              <Typography>{drink.name}</Typography>
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                {new Intl.NumberFormat("vi-VN", {
+                                  style: "currency",
+                                  currency: "VND",
+                                }).format(drink.sellingPrice)}
+                              </Typography>
+                            </Box>
+                            <Box
+                              sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 1,
+                              }}
+                            >
+                              <IconButton
+                                size="small"
+                                onClick={() =>
+                                  handleUpdateDrinkQuantity(drink.id, -1)
+                                }
+                              >
+                                <RemoveIcon />
+                              </IconButton>
+                              <Typography>{drink.quantity}</Typography>
+                              <IconButton
+                                size="small"
+                                onClick={() =>
+                                  handleUpdateDrinkQuantity(drink.id, 1)
+                                }
+                              >
+                                <AddIcon />
+                              </IconButton>
+                            </Box>
+                          </Card>
+                        ))}
+                      </Stack>
+                    </Box>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        </DialogContent>
+
+        <DialogActions
+          sx={{
+            borderTop: 1,
+            borderColor: "divider",
+            px: 3,
+            py: 2,
+          }}
+        >
+          <Button variant="outlined" onClick={() => setOpen(false)}>
+            Hủy
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            variant="contained"
+            color="primary"
+            disabled={loading}
+          >
+            {loading ? "Đang xử lý..." : "Nhận phòng"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+};
+
+CustomerInfo.displayName = 'CustomerInfo';
+export default CheckInModal;
