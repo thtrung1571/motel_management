@@ -60,6 +60,36 @@ introduced in `backend/src/controllers/publicLookupController.js` and `backend/s
 
 4. If you are containerizing, copy the project files, run `npm install --production` followed by `npm run build`, and expose port `3000` (or set `PORT` to whichever port your platform expects).
 
+### Deploying on traditional web hosting
+
+Some shared web hosts (cPanel, DirectAdmin, etc.) only allow you to upload static assets (HTML/CSS/JS) without running a Node.js
+process. In that scenario you can still host the lookup app by exporting it as a static bundle and letting the browser call the
+backend API directly:
+
+1. Generate an optimized static build:
+
+   ```bash
+   npm install
+   npm run build
+   npm run export
+   ```
+
+   This creates an `out/` directory containing pre-rendered HTML and bundled assets.
+
+2. Upload the contents of `out/` to your hosting provider's public web root (for example, `public_html/tracuu`). Be sure to copy
+   the nested `_next/` folder as well.
+
+3. Update your DNS or create a subdirectory/redirect so `https://site.com/tracuu` serves the uploaded files.
+
+4. Because the app still calls the backend at runtime, ensure the browser can reach your API by setting
+   `NEXT_PUBLIC_API_BASE_URL` **before** running `npm run build`. The value you set is baked into the exported assets.
+
+5. If your host supports environment variables or `.htaccess` rewrites, you can configure caching headers for `_next/static` to
+   improve performance, but avoid caching the HTML shell for too long if you plan to redeploy frequently.
+
+> **Note:** Static export removes server features like `app/api` routes and server actions. Those are not used in this lookup UI,
+> so the exported bundle will continue to fetch live data from your existing backend endpoints.
+
 ## Next Steps
 - Add error boundaries and toast notifications for network failures.
 - Extend the public API to include additional summary fields when needed (e.g., outstanding balances).
