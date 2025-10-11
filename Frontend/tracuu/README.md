@@ -39,6 +39,27 @@ introduced in `backend/src/controllers/publicLookupController.js` and `backend/s
 2. Confirm the backend `.env` contains the required database connection secrets.
 3. Deploy the Next.js app and configure `NEXT_PUBLIC_API_BASE_URL` to point at the freshly updated backend.
 
+### Production build and hosting
+
+1. Install dependencies and build the production bundle:
+
+   ```bash
+   npm install
+   npm run build
+   ```
+
+2. Start the production server with Node.js:
+
+   ```bash
+   npm run start
+   ```
+
+   This runs `next start`, which serves the compiled app from the `.next` directory—no custom `server.js` is required unless you need bespoke routing or middleware.
+
+3. When deploying to a platform such as Vercel, Netlify, Render, or a self-hosted Node server, point the process manager (PM2, systemd, Docker, etc.) at `npm run start` and ensure `NODE_ENV=production` and `NEXT_PUBLIC_API_BASE_URL` are exported.
+
+4. If you are containerizing, copy the project files, run `npm install --production` followed by `npm run build`, and expose port `3000` (or set `PORT` to whichever port your platform expects).
+
 ## Next Steps
 - Add error boundaries and toast notifications for network failures.
 - Extend the public API to include additional summary fields when needed (e.g., outstanding balances).
