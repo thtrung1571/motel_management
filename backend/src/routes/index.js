@@ -10,6 +10,7 @@ const userRoutes = require('./user.routes');
 const settingsRoutes = require('./settings.routes');
 const dashboardRoutes = require('./dashboard.routes');
 const shiftRoutes = require('./shift.routes');
+const publicRoutes = require('./public.routes');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -21,5 +22,6 @@ router.use('/users', userRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/shifts', shiftRoutes);
+router.use('/public', publicRoutes);
 
-module.exports = router; 
+module.exports = router;

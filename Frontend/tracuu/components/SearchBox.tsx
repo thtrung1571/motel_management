@@ -1,9 +1,26 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
-import { performLookup } from "../app/actions";
-import { LookupResult } from "../lib/search";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "./command";
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition
+} from "react";
+import {
+  LookupResult,
+  LookupSuggestion,
+  fetchCustomerDetails,
+  fetchSuggestions,
+  resolveLookup
+} from "../lib/search";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem
+} from "./command";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { Loader2 } from "lucide-react";
 import clsx from "clsx";
@@ -16,33 +33,26 @@ type SearchBoxProps = {
 
 export function SearchBox({ onResult }: SearchBoxProps) {
   const [term, setTerm] = useState("");
-  const [state, formAction, isPending] = useActionState(async (_prev: LookupResult, formData: FormData) => {
-    const value = String(formData.get("term") ?? "");
-    const next = await performLookup(value);
-    onResult(next);
-    setTerm(value);
-    return next;
-  }, INITIAL_STATE);
-  const [suggestions, setSuggestions] = useState(INITIAL_STATE.suggestions);
-  const [isLoadingSuggestions, startTransition] = useTransition();
+  const [suggestions, setSuggestions] = useState<LookupSuggestion[]>([]);
+  const [isSubmitting, startSubmitTransition] = useTransition();
+  const [isLoadingSuggestions, startSuggestionTransition] = useTransition();
+
+  const hasSuggestions = suggestions.length > 0 && term.trim().length > 0;
 
   useEffect(() => {
-    setSuggestions(state.suggestions);
-  }, [state]);
-
-  useEffect(() => {
-    if (!term) {
+    if (!term.trim()) {
       setSuggestions([]);
+      onResult(INITIAL_STATE);
       return;
     }
 
     const controller = new AbortController();
 
     const timeout = setTimeout(() => {
-      startTransition(async () => {
-        const result = await performLookup(term);
+      startSuggestionTransition(async () => {
+        const nextSuggestions = await fetchSuggestions(term, controller.signal);
         if (!controller.signal.aborted) {
-          setSuggestions(result.suggestions);
+          setSuggestions(nextSuggestions);
         }
       });
     }, 200);
@@ -51,36 +61,60 @@ export function SearchBox({ onResult }: SearchBoxProps) {
       controller.abort();
       clearTimeout(timeout);
     };
-  }, [term, startTransition]);
+  }, [term, startSuggestionTransition, onResult]);
 
-  const hasSuggestions = suggestions.length > 0 && term.length > 0;
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const value = term.trim();
+
+    if (!value) {
+      onResult(INITIAL_STATE);
+      setSuggestions([]);
+      return;
+    }
+
+    startSubmitTransition(async () => {
+      const result = await resolveLookup(value);
+      onResult(result);
+      setSuggestions(result.suggestions);
+    });
+  };
+
+  const handleSuggestionSelect = (value: string) => {
+    const selected = suggestions.find((item) => String(item.id) === value);
+    if (!selected) {
+      return;
+    }
+
+    setTerm(selected.carNumber);
+    startSubmitTransition(async () => {
+      const record = await fetchCustomerDetails(selected.id);
+      onResult({
+        record,
+        suggestions
+      });
+    });
+  };
 
   const suggestionItems = useMemo(
     () =>
       suggestions.map((suggestion) => (
         <CommandItem
-          key={suggestion.plateNumber}
-          value={suggestion.plateNumber}
-          onSelect={(value) => {
-            const match = suggestions.find((item) => item.plateNumber === value);
-            if (match) {
-              const result: LookupResult = { record: match, suggestions: suggestions.slice(0, 5) };
-              onResult(result);
-              setTerm(match.plateNumber);
-            }
-          }}
+          key={suggestion.id}
+          value={String(suggestion.id)}
+          onSelect={handleSuggestionSelect}
         >
           <div className="flex flex-col text-left">
-            <span className="font-medium">{suggestion.plateNumber}</span>
+            <span className="font-medium">{suggestion.carNumber}</span>
             <span className="text-xs text-slate-400">{suggestion.fullName}</span>
           </div>
         </CommandItem>
       )),
-    [suggestions, onResult]
+    [suggestions]
   );
 
   return (
-    <form action={formAction} className="w-full max-w-xl">
+    <form onSubmit={handleSubmit} className="w-full max-w-xl">
       <label htmlFor="term" className="sr-only">
         Tra cứu biển số hoặc CCCD
       </label>
@@ -99,10 +133,12 @@ export function SearchBox({ onResult }: SearchBoxProps) {
           type="submit"
           className={clsx(
             "absolute right-2 top-1/2 flex h-10 -translate-y-1/2 items-center justify-center rounded-full bg-primary px-6 text-sm font-semibold text-white shadow-lg transition hover:bg-primary/90",
-            (isPending || isLoadingSuggestions) && "pr-4"
+            (isSubmitting || isLoadingSuggestions) && "pr-4"
           )}
         >
-          {(isPending || isLoadingSuggestions) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {(isSubmitting || isLoadingSuggestions) && (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          )}
           Tra cứu
         </button>
       </div>
@@ -115,9 +151,7 @@ export function SearchBox({ onResult }: SearchBoxProps) {
           placeholder="Nhập biển số"
         />
         <CommandEmpty>Không có gợi ý phù hợp</CommandEmpty>
-        <CommandGroup heading="Gợi ý">
-          {suggestionItems}
-        </CommandGroup>
+        <CommandGroup heading="Gợi ý">{suggestionItems}</CommandGroup>
       </Command>
     </form>
   );
