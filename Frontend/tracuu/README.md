@@ -54,11 +54,38 @@ introduced in `backend/src/controllers/publicLookupController.js` and `backend/s
    npm run start
    ```
 
-   This runs `next start`, which serves the compiled app from the `.next` directory—no custom `server.js` is required unless you need bespoke routing or middleware.
+   This runs `next start`, which serves the compiled app from the `.next` directory.
 
 3. When deploying to a platform such as Vercel, Netlify, Render, or a self-hosted Node server, point the process manager (PM2, systemd, Docker, etc.) at `npm run start` and ensure `NODE_ENV=production` and `NEXT_PUBLIC_API_BASE_URL` are exported.
 
 4. If you are containerizing, copy the project files, run `npm install --production` followed by `npm run build`, and expose port `3000` (or set `PORT` to whichever port your platform expects).
+
+### Running with a custom `server.js`
+
+Some hosting providers let you run arbitrary Node.js scripts but require you to bring your own HTTP server. For that scenario, this project includes a lightweight Express wrapper around Next.js:
+
+1. Build the production bundle:
+
+   ```bash
+   npm install
+   npm run build
+   ```
+
+2. Launch the Express server (set `NODE_ENV=production` for optimized mode):
+
+   ```bash
+   # macOS/Linux
+   NODE_ENV=production PORT=3000 npm run start:server
+
+   # Windows PowerShell
+   $env:NODE_ENV="production"; $env:PORT="3000"; npm run start:server
+   ```
+
+   The custom server proxies every request to Next.js and also exposes `GET /healthz` for uptime checks. Adjust the `PORT` or add additional middleware in `server.js` as your host requires.
+
+3. Configure your hosting control panel or process manager to execute `npm run start:server` on boot.
+
+> **Tip:** Use the custom server only when your platform cannot run `next start`. Managed platforms (Vercel, Netlify, Render, etc.) should continue to use the default Next.js server for the best performance.
 
 ### Deploying on traditional web hosting
 
