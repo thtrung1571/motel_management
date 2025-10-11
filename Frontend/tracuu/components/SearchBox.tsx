@@ -2,6 +2,7 @@
 
 import {
   FormEvent,
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -80,21 +81,24 @@ export function SearchBox({ onResult }: SearchBoxProps) {
     });
   };
 
-  const handleSuggestionSelect = (value: string) => {
-    const selected = suggestions.find((item) => String(item.id) === value);
-    if (!selected) {
-      return;
-    }
+  const handleSuggestionSelect = useCallback(
+    (value: string) => {
+      const selected = suggestions.find((item) => String(item.id) === value);
+      if (!selected) {
+        return;
+      }
 
-    setTerm(selected.carNumber);
-    startSubmitTransition(async () => {
-      const record = await fetchCustomerDetails(selected.id);
-      onResult({
-        record,
-        suggestions
+      setTerm(selected.carNumber);
+      startSubmitTransition(async () => {
+        const record = await fetchCustomerDetails(selected.id);
+        onResult({
+          record,
+          suggestions
+        });
       });
-    });
-  };
+    },
+    [onResult, suggestions, startSubmitTransition]
+  );
 
   const suggestionItems = useMemo(
     () =>
@@ -110,7 +114,7 @@ export function SearchBox({ onResult }: SearchBoxProps) {
           </div>
         </CommandItem>
       )),
-    [suggestions]
+    [handleSuggestionSelect, suggestions]
   );
 
   return (
