@@ -31,6 +31,14 @@ npm run dev
 
 The development server listens on `http://localhost:3000`.
 
+## Deployment Checklist
+To run the lookup flow against the real database you need to ship **both** the new Next.js front end _and_ the backend updates
+introduced in `backend/src/controllers/publicLookupController.js` and `backend/src/routes/public.routes.js`.
+
+1. Deploy the backend first so the `/api/public/lookup` and `/api/public/suggest` endpoints are available.
+2. Confirm the backend `.env` contains the required database connection secrets.
+3. Deploy the Next.js app and configure `NEXT_PUBLIC_API_BASE_URL` to point at the freshly updated backend.
+
 ## Next Steps
 - Add error boundaries and toast notifications for network failures.
 - Extend the public API to include additional summary fields when needed (e.g., outstanding balances).
