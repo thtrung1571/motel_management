@@ -15,7 +15,11 @@ function App() {
   const dispatch = useDispatch();
 
   useEffect(() => {
-    dispatch(getCurrentUser());
+    const token = localStorage.getItem("token");
+    const isPublicPath = window.location.pathname.startsWith('/tracuu');
+    if (token && !isPublicPath) {
+      dispatch(getCurrentUser());
+    }
   }, [dispatch]);
 
   return (

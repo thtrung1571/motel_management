@@ -12,7 +12,7 @@ router.get('/search', customerController.searchCustomers);
 router.get('/search/:id', customerController.getCustomerDetails);
 
 // Đặt route import 
-router.post('/import', upload.single('file'), customerController.importCustomers);
+router.post('/import', upload.single('file'), customerController.importCustomersV2);
 
 // Routes cho khách hàng liên quan
 router.get('/related', customerController.getRelatedCustomers);
@@ -30,3 +30,4 @@ router.put('/:id', customerController.updateCustomer);
 router.delete('/:id', customerController.deleteCustomer);
 
 module.exports = router; 
+//updated

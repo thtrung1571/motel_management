@@ -21,6 +21,7 @@ const LogicPriceSetting = lazy(() => import("../components/features/settings/Log
 const MainLayout = lazy(() => import("../components/common/Layout/MainLayout"));
 const RoomHistory = lazy(() => import("../components/features/room/RoomHistory"));
 const AdminRoomHistory = lazy(() => import("../components/features/room/AdminRoomHistory"));
+const TraCuu = lazy(() => import("../components/public/TraCuu"));
 
 const PrivateRoute = ({ children }) => {
   const { token, user } = useSelector((state) => state.auth);
@@ -63,6 +64,15 @@ const AppRoutes = () => {
         element={
           <Suspense fallback={<LoadingSpinner />}>
             <LoginForm />
+          </Suspense>
+        } 
+      />
+
+      <Route 
+        path="/tracuu" 
+        element={
+          <Suspense fallback={<LoadingSpinner />}>
+            <TraCuu />
           </Suspense>
         } 
       />
@@ -197,3 +207,4 @@ const AppRoutes = () => {
 };
 
 export default AppRoutes;
+ 
